@@ -17,7 +17,8 @@ const parseEnv = () => {
   const result = envSchema.safeParse(process.env);
   if (!result.success) {
     console.error('❌ [Config] Invalid Environment Variables:');
-    result.error.errors.forEach((err) => {
+    const issues = result.error.issues || (result.error as any).errors || [];
+    issues.forEach((err: any) => {
       console.error(`   - ${err.path.join('.')}: ${err.message}`);
     });
     process.exit(1);
