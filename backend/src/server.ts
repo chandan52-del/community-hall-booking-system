@@ -1,6 +1,7 @@
-import express from 'express';
+import express, { type Request, type Response } from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
+import type { Server } from 'http';
 import { Prisma } from '@prisma/client';
 import { env } from './config/env.js';
 import { prisma, disconnectPrisma } from './database/client.js';
@@ -17,15 +18,14 @@ const app = express();
 const PORT = env.PORT;
 
 // Global Middleware
-const allowedOrigins = [env.FRONTEND_URL].concat(
-  process.env.ADDITIONAL_ALLOWED_ORIGINS
-    ? process.env.ADDITIONAL_ALLOWED_ORIGINS.split(',').map((s) => s.trim())
-    : []
-);
+const additionalOrigins = process.env.ADDITIONAL_ALLOWED_ORIGINS
+  ? process.env.ADDITIONAL_ALLOWED_ORIGINS.split(',').map((s) => s.trim())
+  : [];
+const allowedOrigins: string[] = [env.FRONTEND_URL, ...additionalOrigins];
 
 app.use(
   cors({
-    origin: (origin, callback) => {
+    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
       // In development or test, allow requests with no origin (curl/mobile/local) or localhost
       if (!origin || env.NODE_ENV !== 'production' || allowedOrigins.includes(origin)) {
         callback(null, true);
@@ -42,7 +42,7 @@ if (env.NODE_ENV !== 'test') {
 }
 
 // Health check endpoint (Liveness)
-app.get('/api/health', (_req, res) => {
+app.get('/api/health', (_req: Request, res: Response): void => {
   res.status(200).json({
     status: 'healthy',
     project: 'Community Hall Booking and Management System API',
@@ -52,7 +52,7 @@ app.get('/api/health', (_req, res) => {
 });
 
 // Database Readiness check (Readiness)
-app.get('/api/health/ready', async (_req, res) => {
+app.get('/api/health/ready', async (_req: Request, res: Response): Promise<void> => {
   try {
     await prisma.$queryRaw(Prisma.sql`SELECT 1`);
     res.status(200).json({
@@ -60,11 +60,12 @@ app.get('/api/health/ready', async (_req, res) => {
       database: 'connected',
       timestamp: new Date().toISOString(),
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const errorMessage = err instanceof Error ? err.message : 'Database connection failure';
     res.status(503).json({
       status: 'unready',
       database: 'disconnected',
-      error: env.NODE_ENV === 'production' ? 'Database connection failure' : err.message,
+      error: env.NODE_ENV === 'production' ? 'Database connection failure' : errorMessage,
     });
   }
 });
@@ -77,7 +78,7 @@ app.use('/api/maintenance', maintenanceRoutes);
 app.use('/api/admin', adminRoutes);
 
 // Root Welcome Endpoint
-app.get('/', (_req, res) => {
+app.get('/', (_req: Request, res: Response): void => {
   res.json({
     message: 'Community Hall Booking and Management System REST API',
     version: '1.0.0',
@@ -100,7 +101,7 @@ app.use(notFoundHandler);
 app.use(errorHandler);
 
 // Server startup
-let server: any;
+let server: Server | undefined;
 if (process.env.NODE_ENV !== 'test') {
   server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`[API] Server is actively listening on http://0.0.0.0:${PORT} (env: ${env.NODE_ENV})`);
@@ -108,7 +109,7 @@ if (process.env.NODE_ENV !== 'test') {
 }
 
 // Graceful Shutdown handling
-const handleGracefulShutdown = async (signal: string) => {
+const handleGracefulShutdown = async (signal: string): Promise<void> => {
   console.log(`[API] Received ${signal}. Commencing graceful server shutdown...`);
   if (server) {
     server.close(async () => {

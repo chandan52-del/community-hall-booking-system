@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../database/client.js';
 import { sendSuccess } from '../utils/response.js';
 
@@ -81,10 +82,10 @@ export const getAdminStats = async (_req: Request, res: Response): Promise<void>
 export const getCalendarFeed = async (req: Request, res: Response): Promise<void> => {
   const { hallId, month, year } = req.query;
 
-  const bookingWhere: any = {
+  const bookingWhere: Prisma.BookingWhereInput = {
     status: { in: ['APPROVED', 'PENDING'] },
   };
-  const maintenanceWhere: any = {
+  const maintenanceWhere: Prisma.MaintenanceScheduleWhereInput = {
     status: { in: ['SCHEDULED', 'IN_PROGRESS'] },
   };
 

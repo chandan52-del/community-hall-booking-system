@@ -17,9 +17,10 @@ const parseEnv = () => {
   const result = envSchema.safeParse(process.env);
   if (!result.success) {
     console.error('❌ [Config] Invalid Environment Variables:');
-    const issues = result.error.issues || (result.error as any).errors || [];
-    issues.forEach((err: any) => {
-      console.error(`   - ${err.path.join('.')}: ${err.message}`);
+    const issues = result.error.issues || (result.error as { errors?: Array<{ path: Array<string | number>; message: string }> }).errors || [];
+    issues.forEach((err) => {
+      const fieldPath = Array.isArray(err.path) ? err.path.join('.') : String(err.path || '');
+      console.error(`   - ${fieldPath}: ${err.message}`);
     });
     process.exit(1);
   }

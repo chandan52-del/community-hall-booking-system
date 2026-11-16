@@ -2,18 +2,18 @@ import { Request, Response } from 'express';
 import { prisma } from '../database/client.js';
 import { createMaintenanceSchema, updateMaintenanceStatusSchema } from '../validators/maintenanceValidator.js';
 import { scheduleMaintenanceWithLock } from '../services/conflictService.js';
-import { sendSuccess, sendError } from '../utils/response.js';
+import { sendSuccess, sendError, AppError } from '../utils/response.js';
 import { AuthenticatedRequest } from '../middleware/auth.js';
-import { MaintenanceStatus } from '@prisma/client';
+import { MaintenanceStatus, Prisma } from '@prisma/client';
 
 export const getMaintenanceSchedules = async (req: Request, res: Response): Promise<void> => {
   const { hallId, status } = req.query;
 
-  const whereClause: any = {};
+  const whereClause: Prisma.MaintenanceScheduleWhereInput = {};
   if (hallId && typeof hallId === 'string') {
     whereClause.hallId = hallId;
   }
-  if (status && typeof status === 'string' && Object.values(MaintenanceStatus).includes(status as any)) {
+  if (status && typeof status === 'string' && Object.values(MaintenanceStatus).includes(status as MaintenanceStatus)) {
     whereClause.status = status as MaintenanceStatus;
   }
 
@@ -54,16 +54,13 @@ export const createMaintenance = async (req: AuthenticatedRequest, res: Response
     });
 
     sendSuccess(res, maintenance, 'Maintenance schedule created successfully', 201);
-  } catch (err: any) {
-    if (err.statusCode === 409) {
-      sendError(res, 409, err.code || 'MAINTENANCE_CONFLICT', err.message, err.details);
+  } catch (err: unknown) {
+    if (err instanceof AppError) {
+      sendError(res, err.statusCode, err.code, err.message, err.details);
       return;
     }
-    if (err.statusCode === 404) {
-      sendError(res, 404, err.code || 'HALL_NOT_FOUND', err.message);
-      return;
-    }
-    sendError(res, 500, 'SCHEDULE_FAILED', err.message || 'Failed to schedule maintenance');
+    const message = err instanceof Error ? err.message : 'Failed to schedule maintenance';
+    sendError(res, 500, 'SCHEDULE_FAILED', message);
   }
 };
 

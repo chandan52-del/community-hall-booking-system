@@ -2,9 +2,9 @@ import { Response } from 'express';
 import { prisma } from '../database/client.js';
 import { createBookingSchema, rejectBookingSchema } from '../validators/bookingValidator.js';
 import { approveBookingWithLock } from '../services/conflictService.js';
-import { sendSuccess, sendError } from '../utils/response.js';
+import { sendSuccess, sendError, AppError } from '../utils/response.js';
 import { AuthenticatedRequest } from '../middleware/auth.js';
-import { BookingStatus } from '@prisma/client';
+import { BookingStatus, Prisma } from '@prisma/client';
 
 export const createBooking = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const parseResult = createBookingSchema.safeParse(req.body);
@@ -150,11 +150,11 @@ export const getMyBookings = async (req: AuthenticatedRequest, res: Response): P
 export const getAllBookings = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const { hallId, status, eventDate } = req.query;
 
-  const whereClause: any = {};
+  const whereClause: Prisma.BookingWhereInput = {};
   if (hallId && typeof hallId === 'string') {
     whereClause.hallId = hallId;
   }
-  if (status && typeof status === 'string' && Object.values(BookingStatus).includes(status as any)) {
+  if (status && typeof status === 'string' && Object.values(BookingStatus).includes(status as BookingStatus)) {
     whereClause.status = status as BookingStatus;
   }
   if (eventDate && typeof eventDate === 'string') {
@@ -231,16 +231,13 @@ export const approveBooking = async (req: AuthenticatedRequest, res: Response): 
   try {
     const approvedBooking = await approveBookingWithLock(id);
     sendSuccess(res, approvedBooking, 'Booking approved successfully');
-  } catch (err: any) {
-    if (err.statusCode === 409) {
-      sendError(res, 409, err.code || 'BOOKING_CONFLICT', err.message, err.details);
+  } catch (err: unknown) {
+    if (err instanceof AppError) {
+      sendError(res, err.statusCode, err.code, err.message, err.details);
       return;
     }
-    if (err.statusCode === 404) {
-      sendError(res, 404, err.code || 'BOOKING_NOT_FOUND', err.message);
-      return;
-    }
-    sendError(res, 500, 'APPROVAL_FAILED', err.message || 'Failed to approve booking');
+    const message = err instanceof Error ? err.message : 'Failed to approve booking';
+    sendError(res, 500, 'APPROVAL_FAILED', message);
   }
 };
 

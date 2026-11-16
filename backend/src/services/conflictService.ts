@@ -1,11 +1,12 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../database/client.js';
+import { AppError } from '../utils/response.js';
 
 export interface ConflictResult {
   hasConflict: boolean;
   type?: 'MAINTENANCE_BLACKOUT' | 'APPROVED_BOOKING_OVERLAP';
   message?: string;
-  conflictDetails?: any;
+  conflictDetails?: Record<string, unknown>;
 }
 
 /**
@@ -20,17 +21,14 @@ export interface ConflictResult {
  */
 export const approveBookingWithLock = async (bookingId: string) => {
   return await prisma.$transaction(
-    async (tx) => {
+    async (tx: Prisma.TransactionClient) => {
       // 1. Fetch target booking
       const booking = await tx.booking.findUnique({
         where: { id: bookingId },
       });
 
       if (!booking) {
-        const err: any = new Error(`Booking with ID ${bookingId} does not exist`);
-        err.statusCode = 404;
-        err.code = 'BOOKING_NOT_FOUND';
-        throw err;
+        throw new AppError(`Booking with ID ${bookingId} does not exist`, 404, 'BOOKING_NOT_FOUND');
       }
 
       if (booking.status === 'APPROVED') {
@@ -54,18 +52,17 @@ export const approveBookingWithLock = async (bookingId: string) => {
       });
 
       if (activeMaintenance) {
-        const err: any = new Error(
-          `Hall is closed for maintenance (${activeMaintenance.description}) from ${activeMaintenance.startDate} to ${activeMaintenance.endDate}`
+        throw new AppError(
+          `Hall is closed for maintenance (${activeMaintenance.description}) from ${activeMaintenance.startDate} to ${activeMaintenance.endDate}`,
+          409,
+          'MAINTENANCE_CONFLICT',
+          {
+            maintenanceId: activeMaintenance.id,
+            startDate: activeMaintenance.startDate,
+            endDate: activeMaintenance.endDate,
+            description: activeMaintenance.description,
+          }
         );
-        err.statusCode = 409;
-        err.code = 'MAINTENANCE_CONFLICT';
-        err.details = {
-          maintenanceId: activeMaintenance.id,
-          startDate: activeMaintenance.startDate,
-          endDate: activeMaintenance.endDate,
-          description: activeMaintenance.description,
-        };
-        throw err;
       }
 
       // 4. Check for Overlapping Approved Bookings on that Date
@@ -82,19 +79,18 @@ export const approveBookingWithLock = async (bookingId: string) => {
       });
 
       if (conflictingBooking) {
-        const err: any = new Error(
-          `Overlapping approved booking ${conflictingBooking.id} (${conflictingBooking.startTime}–${conflictingBooking.endTime}) already reserves this slot`
+        throw new AppError(
+          `Overlapping approved booking ${conflictingBooking.id} (${conflictingBooking.startTime}–${conflictingBooking.endTime}) already reserves this slot`,
+          409,
+          'SLOT_OVERLAP_CONFLICT',
+          {
+            conflictingBookingId: conflictingBooking.id,
+            eventDate: conflictingBooking.eventDate,
+            startTime: conflictingBooking.startTime,
+            endTime: conflictingBooking.endTime,
+            eventType: conflictingBooking.eventType,
+          }
         );
-        err.statusCode = 409;
-        err.code = 'SLOT_OVERLAP_CONFLICT';
-        err.details = {
-          conflictingBookingId: conflictingBooking.id,
-          eventDate: conflictingBooking.eventDate,
-          startTime: conflictingBooking.startTime,
-          endTime: conflictingBooking.endTime,
-          eventType: conflictingBooking.eventType,
-        };
-        throw err;
       }
 
       // 5. Atomic Approval Transition
@@ -128,17 +124,14 @@ export const scheduleMaintenanceWithLock = async (data: {
   description: string;
 }) => {
   return await prisma.$transaction(
-    async (tx) => {
+    async (tx: Prisma.TransactionClient) => {
       // 1. Verify Hall exists
       const hall = await tx.hall.findUnique({
         where: { id: data.hallId },
       });
 
       if (!hall) {
-        const err: any = new Error(`Hall with ID ${data.hallId} does not exist`);
-        err.statusCode = 404;
-        err.code = 'HALL_NOT_FOUND';
-        throw err;
+        throw new AppError(`Hall with ID ${data.hallId} does not exist`, 404, 'HALL_NOT_FOUND');
       }
 
       // 2. Acquire Pessimistic Row Lock on the Hall
@@ -159,17 +152,16 @@ export const scheduleMaintenanceWithLock = async (data: {
       });
 
       if (clashingBooking) {
-        const err: any = new Error(
-          `Cannot schedule maintenance: Confirmed booking ${clashingBooking.id} is already approved for ${clashingBooking.eventDate}`
+        throw new AppError(
+          `Cannot schedule maintenance: Confirmed booking ${clashingBooking.id} is already approved for ${clashingBooking.eventDate}`,
+          409,
+          'MAINTENANCE_BOOKING_CLASH',
+          {
+            bookingId: clashingBooking.id,
+            eventDate: clashingBooking.eventDate,
+            eventType: clashingBooking.eventType,
+          }
         );
-        err.statusCode = 409;
-        err.code = 'MAINTENANCE_BOOKING_CLASH';
-        err.details = {
-          bookingId: clashingBooking.id,
-          eventDate: clashingBooking.eventDate,
-          eventType: clashingBooking.eventType,
-        };
-        throw err;
       }
 
       // 4. Create Scheduled Maintenance Record

@@ -23,8 +23,8 @@ export const authenticate = (
     const payload = verifyToken(token);
     req.user = payload;
     next();
-  } catch (err: any) {
-    if (err.name === 'TokenExpiredError') {
+  } catch (err: unknown) {
+    if (err instanceof Error && err.name === 'TokenExpiredError') {
       sendError(res, 401, 'TOKEN_EXPIRED', 'Authentication token has expired');
       return;
     }

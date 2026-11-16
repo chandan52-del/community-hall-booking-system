@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../database/client.js';
 import { hallQuerySchema, createHallSchema, updateHallSchema } from '../validators/hallValidator.js';
 import { sendSuccess, sendError } from '../utils/response.js';
@@ -13,7 +14,7 @@ export const getHalls = async (req: Request, res: Response): Promise<void> => {
 
   const { search, area, minCapacity, maxPrice, amenities, isActive, sortBy } = queryResult.data;
 
-  const whereClause: any = {};
+  const whereClause: Prisma.HallWhereInput = {};
 
   if (typeof isActive === 'boolean') {
     whereClause.isActive = isActive;
@@ -51,7 +52,7 @@ export const getHalls = async (req: Request, res: Response): Promise<void> => {
     }
   }
 
-  let orderBy: any = [{ isFeatured: 'desc' }, { seatedCapacity: 'desc' }];
+  let orderBy: Prisma.HallOrderByWithRelationInput | Prisma.HallOrderByWithRelationInput[] = [{ isFeatured: 'desc' }, { seatedCapacity: 'desc' }];
   if (sortBy === 'price_asc') {
     orderBy = { baseRatePerDay: 'asc' };
   } else if (sortBy === 'price_desc') {
@@ -300,9 +301,8 @@ export const updateHall = async (req: AuthenticatedRequest, res: Response): Prom
     });
   }
 
-  const updatePayload: any = { ...data };
-  delete updatePayload.amenityIds;
-  delete updatePayload.images;
+  const { amenityIds, images, ...updateFields } = data;
+  const updatePayload: Prisma.HallUpdateInput = { ...updateFields };
 
   const updatedHall = await prisma.hall.update({
     where: { id },
