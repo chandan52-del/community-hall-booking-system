@@ -1,0 +1,199 @@
+// Prisma Schema for Community Hall Booking and Management System
+// Target Engine: MySQL 8
+// Database: community_hall_management_v2
+
+datasource db {
+  provider          = "mysql"
+  url               = env("DATABASE_URL")
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
+}
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x", "linux-musl-arm64-openssl-3.0.x", "debian-openssl-3.0.x", "linux-arm64-openssl-3.0.x"]
+}
+
+enum Role {
+  CUSTOMER
+  ADMIN
+}
+
+enum BookingStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+  COMPLETED
+}
+
+enum MaintenanceStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+// -------------------------------------------------------------
+// USERS & ROLES
+// -------------------------------------------------------------
+model User {
+  id           String         @id @default(uuid()) @db.VarChar(36)
+  email        String         @unique @db.VarChar(191)
+  passwordHash String         @map("password_hash") @db.VarChar(255)
+  name         String         @db.VarChar(191)
+  phone        String         @db.VarChar(30)
+  organization String?        @db.VarChar(191)
+  role         Role           @default(CUSTOMER)
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+
+  bookings      Booking[]
+  notifications Notification[]
+
+  @@map("users")
+}
+
+// -------------------------------------------------------------
+// HALLS & INVENTORY
+// -------------------------------------------------------------
+model Hall {
+  id               String         @id @db.VarChar(64)
+  name             String         @db.VarChar(191)
+  tagline          String         @db.VarChar(255)
+  address          String         @db.VarChar(255)
+  area             String         @db.VarChar(100)
+  city             String         @default("Bengaluru") @db.VarChar(100)
+  pincode          String         @db.VarChar(20)
+  description      String         @db.Text
+  seatedCapacity   Int            @map("seated_capacity")
+  floatingCapacity Int            @map("floating_capacity")
+  diningCapacity   Int            @default(0) @map("dining_capacity")
+  baseRatePerDay   Decimal        @map("base_rate_per_day") @db.Decimal(10, 2)
+  hourlyRate       Decimal?       @map("hourly_rate") @db.Decimal(10, 2)
+  cleaningFee      Decimal        @map("cleaning_fee") @db.Decimal(10, 2)
+  depositRequired  Decimal        @map("deposit_required") @db.Decimal(10, 2)
+  currency         String         @default("INR") @db.VarChar(10)
+  notes            String?        @db.Text
+  isActive         Boolean        @default(true) @map("is_active")
+  isFeatured       Boolean        @default(false) @map("is_featured")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+
+  amenities            HallAmenity[]
+  images               HallImage[]
+  bookings             Booking[]
+  maintenanceSchedules MaintenanceSchedule[]
+
+  @@index([area])
+  @@index([isActive])
+  @@map("halls")
+}
+
+// -------------------------------------------------------------
+// AMENITIES & NORMALIZED RELATION
+// -------------------------------------------------------------
+model Amenity {
+  id       String        @id @db.VarChar(64)
+  name     String        @db.VarChar(100)
+  category String        @db.VarChar(50)
+  icon     String        @db.VarChar(50)
+
+  halls    HallAmenity[]
+
+  @@map("amenities")
+}
+
+model HallAmenity {
+  hallId    String   @map("hall_id") @db.VarChar(64)
+  amenityId String   @map("amenity_id") @db.VarChar(64)
+
+  hall      Hall     @relation(fields: [hallId], references: [id], onDelete: Cascade)
+  amenity   Amenity  @relation(fields: [amenityId], references: [id], onDelete: Cascade)
+
+  @@id([hallId, amenityId])
+  @@map("hall_amenities")
+}
+
+// -------------------------------------------------------------
+// HALL IMAGES
+// -------------------------------------------------------------
+model HallImage {
+  id        Int      @id @default(autoincrement())
+  hallId    String   @map("hall_id") @db.VarChar(64)
+  imageUrl  String   @map("image_url") @db.VarChar(500)
+  isPrimary Boolean  @default(false) @map("is_primary")
+  sortOrder Int      @default(0) @map("sort_order")
+
+  hall      Hall     @relation(fields: [hallId], references: [id], onDelete: Cascade)
+
+  @@index([hallId])
+  @@map("hall_images")
+}
+
+// -------------------------------------------------------------
+// BOOKINGS
+// -------------------------------------------------------------
+model Booking {
+  id              String        @id @db.VarChar(36)
+  hallId          String        @map("hall_id") @db.VarChar(64)
+  userId          String?       @map("user_id") @db.VarChar(36)
+  eventType       String        @map("event_type") @db.VarChar(100)
+  eventDate       String        @map("event_date") @db.VarChar(10)
+  startTime       String        @map("start_time") @db.VarChar(10)
+  endTime         String        @map("end_time") @db.VarChar(10)
+  guestsCount     Int           @map("guests_count")
+  contactName     String        @map("contact_name") @db.VarChar(191)
+  contactEmail    String        @map("contact_email") @db.VarChar(191)
+  contactPhone    String        @map("contact_phone") @db.VarChar(50)
+  specialRequests String?       @map("special_requests") @db.Text
+  status          BookingStatus @default(PENDING)
+  rejectionReason String?       @map("rejection_reason") @db.Text
+  totalAmount     Decimal       @map("total_amount") @db.Decimal(10, 2)
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  hall            Hall          @relation(fields: [hallId], references: [id], onDelete: Restrict)
+  user            User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([hallId, eventDate])
+  @@index([status])
+  @@index([contactEmail])
+  @@map("bookings")
+}
+
+// -------------------------------------------------------------
+// MAINTENANCE BLACKOUT WINDOWS
+// -------------------------------------------------------------
+model MaintenanceSchedule {
+  id          String            @id @db.VarChar(36)
+  hallId      String            @map("hall_id") @db.VarChar(64)
+  startDate   String            @map("start_date") @db.VarChar(10)
+  endDate     String            @map("end_date") @db.VarChar(10)
+  description String            @db.Text
+  status      MaintenanceStatus @default(SCHEDULED)
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+
+  hall        Hall              @relation(fields: [hallId], references: [id], onDelete: Restrict)
+
+  @@index([hallId, startDate, endDate])
+  @@index([status])
+  @@map("maintenance_schedules")
+}
+
+// -------------------------------------------------------------
+// NOTIFICATIONS
+// -------------------------------------------------------------
+model Notification {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  userId    String   @map("user_id") @db.VarChar(36)
+  title     String   @db.VarChar(191)
+  message   String   @db.Text
+  isRead    Boolean  @default(false) @map("is_read")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}

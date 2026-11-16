@@ -1,0 +1,215 @@
+@import "tailwindcss";
+
+/* =====================================================================
+   DESIGN SYSTEM — "Luxury hospitality + modern architecture"
+   Tailwind v4 reads these @theme tokens and generates utility classes,
+   e.g. --color-forest  ->  bg-forest, text-forest, border-forest
+   Change a value here and the whole application updates.
+   ===================================================================== */
+@theme {
+  /* Surfaces */
+  --color-ivory: #F8F6F0;      /* primary background   */
+  --color-paper: #FFFFFF;      /* cards / secondary bg */
+  --color-sand: #E8E4DA;       /* muted background     */
+  --color-line: #E7E4DC;       /* borders              */
+
+  /* Brand */
+  --color-forest: #173F35;     /* primary brand        */
+  --color-moss: #315C4C;       /* secondary brand      */
+  --color-gold: #C6A66B;       /* accent               */
+  --color-gold-dark: #A8884F;  /* accent hover / text on light */
+
+  /* Text */
+  --color-ink: #292D29;        /* primary text         */
+  --color-stone: #77786F;      /* secondary text       */
+
+  /* Feedback */
+  --color-success: #347A58;
+  --color-warning: #B98232;
+  --color-danger: #B94C46;
+
+  /* Typography */
+  --font-serif: "Playfair Display", Georgia, "Times New Roman", serif;
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  /* Elevation — soft, warm shadows instead of glows */
+  --shadow-soft: 0 1px 2px rgba(41, 45, 41, 0.04), 0 8px 24px -12px rgba(41, 45, 41, 0.12);
+  --shadow-lift: 0 2px 4px rgba(41, 45, 41, 0.04), 0 24px 48px -20px rgba(23, 63, 53, 0.25);
+
+  --ease-elegant: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    background-color: var(--color-ivory);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  h1, h2, h3, h4 {
+    font-family: var(--font-serif);
+    color: var(--color-ink);
+    letter-spacing: -0.01em;
+    line-height: 1.15;
+    font-weight: 500;
+  }
+
+  ::selection {
+    background: var(--color-forest);
+    color: var(--color-ivory);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-gold);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+/* =====================================================================
+   COMPONENT CLASSES — one definition, reused everywhere so buttons,
+   inputs and cards look identical on every page.
+   ===================================================================== */
+@layer components {
+  .container-page {
+    width: 100%;
+    max-width: 1240px;
+    margin-inline: auto;
+    padding-inline: 1.25rem;
+  }
+  @media (min-width: 768px) {
+    .container-page { padding-inline: 2rem; }
+  }
+
+  /* Small uppercase label above headings */
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--color-gold-dark);
+  }
+  .eyebrow::before {
+    content: "";
+    width: 1.75rem;
+    height: 1px;
+    background: currentColor;
+  }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: 999px;
+    padding: 0.8rem 1.5rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+    transition: background-color 0.25s var(--ease-elegant), color 0.25s var(--ease-elegant),
+      border-color 0.25s var(--ease-elegant), transform 0.25s var(--ease-elegant), box-shadow 0.25s var(--ease-elegant);
+    cursor: pointer;
+  }
+  .btn:disabled { opacity: 0.55; cursor: not-allowed; }
+  .btn-sm { padding: 0.55rem 1rem; font-size: 0.8rem; }
+
+  .btn-primary { background: var(--color-forest); color: var(--color-ivory); }
+  .btn-primary:hover:not(:disabled) { background: var(--color-moss); box-shadow: var(--shadow-lift); }
+
+  .btn-gold { background: var(--color-gold); color: var(--color-forest); }
+  .btn-gold:hover:not(:disabled) { background: #d4b77f; }
+
+  .btn-outline { border: 1px solid var(--color-ink); color: var(--color-ink); background: transparent; }
+  .btn-outline:hover:not(:disabled) { background: var(--color-ink); color: var(--color-ivory); }
+
+  .btn-ghost { color: var(--color-ink); background: transparent; }
+  .btn-ghost:hover:not(:disabled) { background: var(--color-sand); }
+
+  .btn-danger { border: 1px solid rgba(185, 76, 70, 0.35); color: var(--color-danger); background: transparent; }
+  .btn-danger:hover:not(:disabled) { background: var(--color-danger); color: #fff; }
+
+  /* Forms */
+  .label {
+    display: block;
+    font-size: 0.75rem;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    color: var(--color-stone);
+    margin-bottom: 0.4rem;
+  }
+  .input {
+    width: 100%;
+    background: var(--color-paper);
+    border: 1px solid var(--color-line);
+    border-radius: 0.6rem;
+    padding: 0.7rem 0.9rem;
+    font-size: 0.9rem;
+    color: var(--color-ink);
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .input::placeholder { color: #a6a69c; }
+  .input:focus {
+    outline: none;
+    border-color: var(--color-moss);
+    box-shadow: 0 0 0 3px rgba(49, 92, 76, 0.12);
+  }
+  .input[aria-invalid="true"] { border-color: var(--color-danger); }
+  select.input {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2377786F' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.85rem center;
+    padding-right: 2.25rem;
+  }
+
+  /* Surfaces */
+  .card {
+    background: var(--color-paper);
+    border: 1px solid var(--color-line);
+    border-radius: 1rem;
+  }
+
+  .divider { height: 1px; background: var(--color-line); }
+
+  /* Skeleton shimmer for loading states */
+  .skeleton {
+    background: linear-gradient(90deg, var(--color-sand) 0%, #f1eee6 50%, var(--color-sand) 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.4s ease-in-out infinite;
+    border-radius: 0.5rem;
+  }
+
+  /* Range input in brand colour */
+  input[type="range"] { accent-color: var(--color-forest); }
+  input[type="checkbox"] { accent-color: var(--color-forest); }
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Thin, warm scrollbar */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--color-ivory); }
+::-webkit-scrollbar-thumb { background: #d6d1c4; border-radius: 10px; border: 2px solid var(--color-ivory); }
