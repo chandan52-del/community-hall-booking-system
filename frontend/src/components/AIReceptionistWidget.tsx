@@ -91,12 +91,14 @@ export const AIReceptionistWidget: React.FC = () => {
       // 2. Fetch authenticated signed URL and current date from backend broker
       let signedUrl: string | null = null;
       let backendDate: string | null = null;
+      let backendDetails: any = null;
 
       try {
         const detailsRes = await receptionistApi.getConnectionDetails();
         if (detailsRes?.data?.signedUrl) {
           signedUrl = detailsRes.data.signedUrl;
           backendDate = detailsRes.data.currentDate || null;
+          backendDetails = detailsRes.data;
         } else {
           throw new Error('Backend did not return a valid signed conversation URL.');
         }
@@ -140,13 +142,27 @@ export const AIReceptionistWidget: React.FC = () => {
         todayDate = `${y}-${m}-${d}`;
       }
 
+      // Dynamic variables from backend broker (calculated fresh in Asia/Kolkata timezone)
+      let dynamicVars = backendDetails?.dynamicVariables;
+      let dynamicGreeting = backendDetails?.greeting;
+
+      if (!dynamicVars) {
+        dynamicVars = {
+          date: todayDate,
+          time: '09:00 AM',
+          time_of_day: 'morning',
+          greeting: 'Hey, Namaste! Good morning. Welcome to our Community Hall Booking service. How may I help you today?',
+        };
+      }
+      if (!dynamicGreeting) {
+        dynamicGreeting = dynamicVars.greeting || 'Hey, Namaste! Welcome to our Community Hall Booking service. How may I help you today?';
+      }
+
       // 3. Start Session using official ElevenLabs Client with signed URL and dynamic variables
       const conv = await Conversation.startSession({
         signedUrl,
         connectionType: 'websocket',
-        dynamicVariables: {
-          date: todayDate,
-        },
+        dynamicVariables: dynamicVars,
         onConnect: () => {
           setConnectionState('connected');
           setAgentMode('listening');
@@ -155,7 +171,7 @@ export const AIReceptionistWidget: React.FC = () => {
             {
               id: `init-msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
               source: 'ai',
-              text: 'Namaste! Welcome to our Community Hall Booking Service. How can I help you plan your event today?',
+              text: dynamicGreeting,
               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             },
           ]);

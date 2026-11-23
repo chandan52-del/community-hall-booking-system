@@ -2,6 +2,10 @@ import { Router, Request, Response } from 'express';
 import path from 'path';
 import dotenv from 'dotenv';
 import { sendSuccess, sendError } from '../utils/response.js';
+import { getKolkataTimeDetails, getKolkataCurrentDate } from '../utils/time.js';
+
+// Re-export for any modules importing from receptionistRoutes
+export { getKolkataCurrentDate };
 
 // Ensure backend/.env is loaded reliably regardless of execution working directory
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
@@ -35,23 +39,6 @@ const checkRateLimit = (ip: string): boolean => {
 };
 
 /**
- * Returns today's date in Asia/Kolkata timezone formatted as YYYY-MM-DD.
- */
-export const getKolkataCurrentDate = (): string => {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Asia/Kolkata',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date());
-
-  const year = parts.find((p) => p.type === 'year')?.value ?? '2026';
-  const month = parts.find((p) => p.type === 'month')?.value ?? '01';
-  const day = parts.find((p) => p.type === 'day')?.value ?? '01';
-  return `${year}-${month}-${day}`;
-};
-
-/**
  * GET /api/receptionist/connection-details
  * Generates an ephemeral signed WebSocket conversation URL for the ElevenLabs agent.
  * Security & Safety:
@@ -59,7 +46,7 @@ export const getKolkataCurrentDate = (): string => {
  * - Fails safely with 503 if configuration is missing (no silent public fallback).
  * - Never returns or logs API keys or generated tokens.
  * - Enforces rate limiting per IP.
- * - Returns today's date in Asia/Kolkata (YYYY-MM-DD) for tool dynamic variable requirements.
+ * - Calculates fresh IST date, time, and dynamic greeting for every session.
  */
 router.get('/connection-details', async (req: Request, res: Response): Promise<void> => {
   const clientIp = req.ip || req.socket.remoteAddress || 'unknown-ip';
@@ -137,11 +124,22 @@ router.get('/connection-details', async (req: Request, res: Response): Promise<v
       return;
     }
 
-    // Return signed URL and Asia/Kolkata current date safely without logging secrets or full URLs
-    const currentDate = getKolkataCurrentDate();
+    // Fresh IST calculation for this exact conversation start
+    const timeDetails = getKolkataTimeDetails();
+
     sendSuccess(res, {
       signedUrl: payload.signed_url,
-      currentDate,
+      currentDate: timeDetails.currentDate,
+      currentTime: timeDetails.currentTime,
+      timeFormatted: timeDetails.timeFormatted,
+      timeOfDay: timeDetails.timeOfDay,
+      greeting: timeDetails.greeting,
+      dynamicVariables: {
+        date: timeDetails.currentDate,
+        time: timeDetails.timeFormatted,
+        time_of_day: timeDetails.timeOfDay,
+        greeting: timeDetails.greeting,
+      },
     });
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : 'Unknown network failure';
