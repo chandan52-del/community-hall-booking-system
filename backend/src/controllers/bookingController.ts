@@ -5,6 +5,7 @@ import { approveBookingWithLock } from '../services/conflictService.js';
 import { sendSuccess, sendError, AppError } from '../utils/response.js';
 import { AuthenticatedRequest } from '../middleware/auth.js';
 import { BookingStatus, Prisma } from '@prisma/client';
+import { normalizePhoneNumber } from '../utils/phone.js';
 
 export const createBooking = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const parseResult = createBookingSchema.safeParse(req.body);
@@ -15,105 +16,171 @@ export const createBooking = async (req: AuthenticatedRequest, res: Response): P
 
   const data = parseResult.data;
 
-  // 1. Verify Hall Exists & is Active
-  const hall = await prisma.hall.findUnique({
-    where: { id: data.hallId },
-  });
+  try {
+    const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      // 1. Acquire Pessimistic Row Lock on the Hall row to serialize concurrent booking submissions
+      await tx.$queryRaw(
+        Prisma.sql`SELECT id FROM halls WHERE id = ${data.hallId} FOR UPDATE`
+      );
 
-  if (!hall) {
-    sendError(res, 404, 'HALL_NOT_FOUND', `Community hall '${data.hallId}' does not exist`);
-    return;
-  }
+      // 2. Verify Hall Exists & is Active
+      const hall = await tx.hall.findUnique({
+        where: { id: data.hallId },
+      });
 
-  if (!hall.isActive) {
-    sendError(res, 400, 'HALL_INACTIVE', `Community hall '${hall.name}' is currently unavailable for bookings`);
-    return;
-  }
+      if (!hall) {
+        throw new AppError(`Community hall '${data.hallId}' does not exist`, 404, 'HALL_NOT_FOUND');
+      }
 
-  // 2. Preliminary check for Maintenance Blackout
-  const maintenance = await prisma.maintenanceSchedule.findFirst({
-    where: {
-      hallId: data.hallId,
-      status: { in: ['SCHEDULED', 'IN_PROGRESS'] },
-      startDate: { lte: data.eventDate },
-      endDate: { gte: data.eventDate },
-    },
-  });
+      if (!hall.isActive) {
+        throw new AppError(`Community hall '${hall.name}' is currently unavailable for bookings`, 400, 'HALL_INACTIVE');
+      }
 
-  if (maintenance) {
-    sendError(
-      res,
-      409,
-      'MAINTENANCE_BLACKOUT',
-      `Hall is scheduled for maintenance on ${data.eventDate}: ${maintenance.description}`
-    );
-    return;
-  }
+      // 3. Validate Guests Count against Hall Maximum Capacity
+      const maxCapacity = Math.max(hall.floatingCapacity, hall.seatedCapacity);
+      if (data.guestsCount > maxCapacity) {
+        throw new AppError(
+          `Requested guest count (${data.guestsCount}) exceeds the maximum capacity of ${hall.name} (${maxCapacity} guests)`,
+          400,
+          'CAPACITY_EXCEEDED',
+          {
+            requestedGuests: data.guestsCount,
+            maxCapacity,
+            seatedCapacity: hall.seatedCapacity,
+            floatingCapacity: hall.floatingCapacity,
+          }
+        );
+      }
 
-  // 3. Preliminary check for existing APPROVED slot conflict
-  const conflictingApproved = await prisma.booking.findFirst({
-    where: {
-      hallId: data.hallId,
-      eventDate: data.eventDate,
-      status: 'APPROVED',
-      startTime: { lt: data.endTime },
-      endTime: { gt: data.startTime },
-    },
-  });
-
-  if (conflictingApproved) {
-    sendError(
-      res,
-      409,
-      'SLOT_ALREADY_BOOKED',
-      `The requested time slot (${data.startTime}–${data.endTime}) on ${data.eventDate} has already been reserved`
-    );
-    return;
-  }
-
-  // 4. Calculate Total Pricing
-  // Base daily rate + cleaning fee + deposit
-  const totalAmount = Number(hall.baseRatePerDay) + Number(hall.cleaningFee) + Number(hall.depositRequired);
-
-  // 5. Generate Booking Reference ID
-  const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-  const bookingId = `BK-${todayStr}-${randomSuffix}`;
-
-  // 6. Associate with authenticated user if present
-  const userId = req.user?.id || null;
-
-  const newBooking = await prisma.booking.create({
-    data: {
-      id: bookingId,
-      hallId: data.hallId,
-      userId,
-      eventType: data.eventType,
-      eventDate: data.eventDate,
-      startTime: data.startTime,
-      endTime: data.endTime,
-      guestsCount: data.guestsCount,
-      contactName: data.contactName,
-      contactEmail: data.contactEmail,
-      contactPhone: data.contactPhone,
-      specialRequests: data.specialRequests || null,
-      status: 'PENDING',
-      totalAmount,
-    },
-    include: {
-      hall: {
-        select: {
-          id: true,
-          name: true,
-          area: true,
-          city: true,
-          images: { where: { isPrimary: true }, take: 1 },
+      // 4. Preliminary check for Maintenance Blackout
+      const maintenance = await tx.maintenanceSchedule.findFirst({
+        where: {
+          hallId: data.hallId,
+          status: { in: ['SCHEDULED', 'IN_PROGRESS'] },
+          startDate: { lte: data.eventDate },
+          endDate: { gte: data.eventDate },
         },
-      },
-    },
-  });
+      });
 
-  sendSuccess(res, newBooking, 'Booking request submitted successfully', 201);
+      if (maintenance) {
+        throw new AppError(
+          `Hall is scheduled for maintenance on ${data.eventDate}: ${maintenance.description}`,
+          409,
+          'MAINTENANCE_BLACKOUT'
+        );
+      }
+
+      // 5. Preliminary check for existing APPROVED slot conflict
+      const conflictingApproved = await tx.booking.findFirst({
+        where: {
+          hallId: data.hallId,
+          eventDate: data.eventDate,
+          status: 'APPROVED',
+          startTime: { lt: data.endTime },
+          endTime: { gt: data.startTime },
+        },
+      });
+
+      if (conflictingApproved) {
+        throw new AppError(
+          `The requested time slot (${data.startTime}–${data.endTime}) on ${data.eventDate} has already been reserved`,
+          409,
+          'SLOT_ALREADY_BOOKED'
+        );
+      }
+
+      // 6. Duplicate-Submission Protection: Check for matching PENDING booking within 5-minute window
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+      const normalizedPhone = normalizePhoneNumber(data.contactPhone);
+
+      const recentPendingBookings = await tx.booking.findMany({
+        where: {
+          hallId: data.hallId,
+          eventDate: data.eventDate,
+          startTime: data.startTime,
+          endTime: data.endTime,
+          status: 'PENDING',
+          createdAt: { gte: fiveMinutesAgo },
+        },
+        include: {
+          hall: {
+            select: {
+              id: true,
+              name: true,
+              area: true,
+              city: true,
+              images: { where: { isPrimary: true }, take: 1 },
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      const duplicate = recentPendingBookings.find(
+        (b) => normalizePhoneNumber(b.contactPhone) === normalizedPhone
+      );
+
+      if (duplicate) {
+        return { booking: duplicate, isDuplicate: true };
+      }
+
+      // 7. Calculate Total Pricing (Base daily rate + cleaning fee + deposit)
+      const totalAmount = Number(hall.baseRatePerDay) + Number(hall.cleaningFee) + Number(hall.depositRequired);
+
+      // 8. Generate Booking Reference ID
+      const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+      const bookingId = `BK-${todayStr}-${randomSuffix}`;
+
+      // 9. Associate with authenticated user if present
+      const userId = req.user?.id || null;
+
+      const newBooking = await tx.booking.create({
+        data: {
+          id: bookingId,
+          hallId: data.hallId,
+          userId,
+          eventType: data.eventType,
+          eventDate: data.eventDate,
+          startTime: data.startTime,
+          endTime: data.endTime,
+          guestsCount: data.guestsCount,
+          contactName: data.contactName,
+          contactEmail: data.contactEmail,
+          contactPhone: data.contactPhone,
+          specialRequests: data.specialRequests || null,
+          status: 'PENDING',
+          totalAmount,
+        },
+        include: {
+          hall: {
+            select: {
+              id: true,
+              name: true,
+              area: true,
+              city: true,
+              images: { where: { isPrimary: true }, take: 1 },
+            },
+          },
+        },
+      });
+
+      return { booking: newBooking, isDuplicate: false };
+    });
+
+    if (result.isDuplicate) {
+      sendSuccess(res, result.booking, 'Booking request was already received and is pending review', 200);
+    } else {
+      sendSuccess(res, result.booking, 'Booking request submitted successfully', 201);
+    }
+  } catch (err: unknown) {
+    if (err instanceof AppError) {
+      sendError(res, err.statusCode, err.code, err.message, err.details);
+      return;
+    }
+    const message = err instanceof Error ? err.message : 'Failed to process booking request';
+    sendError(res, 500, 'BOOKING_CREATION_FAILED', message);
+  }
 };
 
 export const getMyBookings = async (req: AuthenticatedRequest, res: Response): Promise<void> => {

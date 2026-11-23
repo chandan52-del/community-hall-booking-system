@@ -116,7 +116,7 @@ export const AdminDashboardPage: React.FC = () => {
   });
 
   return (
-    <div className="pb-24">
+    <div className="pb-32">
       <Toaster position="top-right" />
 
       {/* Admin Header */}

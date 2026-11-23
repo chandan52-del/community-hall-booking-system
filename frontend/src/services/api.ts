@@ -145,3 +145,10 @@ export const healthApi = {
     return res.data;
   },
 };
+
+export const receptionistApi = {
+  getConnectionDetails: async () => {
+    const res = await apiClient.get('/receptionist/connection-details');
+    return res.data;
+  },
+};

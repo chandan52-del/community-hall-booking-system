@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { Navbar } from '../components/Navbar';
 import { Footer } from '../components/Footer';
 import { PageLoader } from '../components/ui';
+import { AIReceptionistWidget } from '../components/AIReceptionistWidget';
 
 /**
  * Scroll behaviour for a single-page app:
@@ -42,6 +43,7 @@ export const PublicLayout: React.FC = () => {
         </motion.div>
       </main>
       <Footer />
+      <AIReceptionistWidget />
     </div>
   );
 };

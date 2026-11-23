@@ -12,7 +12,7 @@ type SortKey = 'recommended' | 'price_asc' | 'price_desc' | 'capacity_desc';
 const PRICE_CEILING = 400000;
 
 const ExploreInner: React.FC = () => {
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const { halls, bookings, maintenance } = useData();
 
   const [query, setQuery] = useState('');
@@ -66,6 +66,7 @@ const ExploreInner: React.FC = () => {
   const reset = () => {
     setQuery(''); setAreas([]); setCategory(''); setGuests(''); setDate('');
     setFacilities([]); setMaxPrice(PRICE_CEILING); setOnlyAvailable(false); setSort('recommended');
+    setParams({});
   };
 
   const filterPanel = (

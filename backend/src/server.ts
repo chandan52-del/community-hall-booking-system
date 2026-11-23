@@ -13,6 +13,7 @@ import hallRoutes from './routes/hallRoutes.js';
 import bookingRoutes from './routes/bookingRoutes.js';
 import maintenanceRoutes from './routes/maintenanceRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
+import receptionistRoutes from './routes/receptionistRoutes.js';
 
 const app = express();
 const PORT = env.PORT;
@@ -76,6 +77,7 @@ app.use('/api/halls', hallRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/maintenance', maintenanceRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/receptionist', receptionistRoutes);
 
 // Root Welcome Endpoint
 app.get('/', (_req: Request, res: Response): void => {

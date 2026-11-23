@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Menu, X, ArrowRight } from 'lucide-react';
+import { Menu, X, ArrowRight, LogOut } from 'lucide-react';
 import { Logo } from './ui';
 import { useAuth } from '../contexts/AuthContext';
 import { cn } from '../lib/utils';
@@ -18,7 +18,7 @@ export const Navbar: React.FC = () => {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
   const location = useLocation();
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
@@ -68,7 +68,19 @@ export const Navbar: React.FC = () => {
 
         <div className="hidden items-center gap-2 lg:flex">
           {portal ? (
-            <Link to={portal.to} className="btn btn-ghost btn-sm">{portal.label}</Link>
+            <>
+              <Link to={portal.to} className="btn btn-ghost btn-sm">{portal.label}</Link>
+              <button
+                type="button"
+                onClick={signOut}
+                className="btn btn-ghost btn-sm text-stone hover:text-danger"
+                title="Sign out of current account"
+                aria-label="Sign out"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                <span>Sign Out</span>
+              </button>
+            </>
           ) : (
             <Link to="/login" className="btn btn-ghost btn-sm">Log in</Link>
           )}
@@ -109,7 +121,20 @@ export const Navbar: React.FC = () => {
               ))}
               <div className="mt-6 grid grid-cols-2 gap-3">
                 <Link to={portal?.to ?? '/login'} className="btn btn-outline">{portal?.label ?? 'Log in'}</Link>
-                <Link to="/halls" className="btn btn-primary">Explore</Link>
+                {user ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      signOut();
+                      setOpen(false);
+                    }}
+                    className="btn btn-ghost border border-line text-danger"
+                  >
+                    Sign Out
+                  </button>
+                ) : (
+                  <Link to="/halls" className="btn btn-primary">Explore</Link>
+                )}
               </div>
             </nav>
           </motion.div>

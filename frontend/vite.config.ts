@@ -16,7 +16,7 @@ export default defineConfig({
     chunkSizeWarningLimit: 1200,
     rollupOptions: {
       output: {
-        manualChunks(id) {
+        manualChunks(id: string) {
           if (id.includes('node_modules/three') || id.includes('@react-three')) {
             return 'three-bundle';
           }

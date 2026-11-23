@@ -1,0 +1,544 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Conversation } from '@elevenlabs/client';
+import {
+  Phone,
+  PhoneOff,
+  Mic,
+  MicOff,
+  Volume2,
+  X,
+  Sparkles,
+  AlertCircle,
+  MessageSquare,
+  Globe,
+  Radio,
+  Minimize2,
+  Maximize2,
+} from 'lucide-react';
+import { receptionistApi } from '../services/api';
+
+type ConnectionState = 'idle' | 'requesting_permission' | 'connecting' | 'connected' | 'error';
+type AgentMode = 'listening' | 'speaking' | 'idle';
+
+interface ChatMessage {
+  id: string;
+  source: 'ai' | 'user';
+  text: string;
+  timestamp: string;
+}
+
+export const AIReceptionistWidget: React.FC = () => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [isMinimized, setIsMinimized] = useState(false);
+  const [connectionState, setConnectionState] = useState<ConnectionState>('idle');
+  const [agentMode, setAgentMode] = useState<AgentMode>('idle');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [volume] = useState(1);
+  const [isMuted, setIsMuted] = useState(false);
+
+  const conversationRef = useRef<any>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const isStartingRef = useRef(false);
+
+  // Auto-scroll chat transcripts
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // Clean up voice conversation on unmount
+  useEffect(() => {
+    return () => {
+      if (conversationRef.current) {
+        conversationRef.current.endSession().catch(() => {});
+        conversationRef.current = null;
+      }
+    };
+  }, []);
+
+  const startVoiceSession = async () => {
+    if (isStartingRef.current || conversationRef.current) {
+      return;
+    }
+    isStartingRef.current = true;
+    setErrorMessage(null);
+    setConnectionState('requesting_permission');
+
+    // 1. Request microphone permission explicitly and release probe tracks cleanly
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Your browser does not support audio recording. Please use Chrome, Edge, or Safari.');
+      }
+      const probeStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      probeStream.getTracks().forEach((track) => track.stop());
+    } catch (permErr: any) {
+      isStartingRef.current = false;
+      setConnectionState('error');
+      if (permErr.name === 'NotAllowedError' || permErr.name === 'PermissionDeniedError') {
+        setErrorMessage('Microphone access was denied. Please allow microphone permissions in your browser address bar.');
+      } else if (permErr.name === 'NotFoundError' || permErr.name === 'DevicesNotFoundError') {
+        setErrorMessage('No microphone device was detected on your system. Please connect a microphone.');
+      } else {
+        setErrorMessage(permErr.message || 'Microphone initialization failed.');
+      }
+      return;
+    }
+
+    setConnectionState('connecting');
+
+    try {
+      // 2. Fetch authenticated signed URL and current date from backend broker
+      let signedUrl: string | null = null;
+      let backendDate: string | null = null;
+
+      try {
+        const detailsRes = await receptionistApi.getConnectionDetails();
+        if (detailsRes?.data?.signedUrl) {
+          signedUrl = detailsRes.data.signedUrl;
+          backendDate = detailsRes.data.currentDate || null;
+        } else {
+          throw new Error('Backend did not return a valid signed conversation URL.');
+        }
+      } catch (backendErr: any) {
+        const backendCode = backendErr.response?.data?.error?.code;
+        const backendMsg = backendErr.response?.data?.error?.message;
+
+        if (backendCode === 'ELEVENLABS_CONFIG_MISSING') {
+          setErrorMessage('ElevenLabs API key is not configured. Please add ELEVENLABS_API_KEY to backend/.env.');
+        } else if (backendCode === 'ELEVENLABS_AGENT_MISSING') {
+          setErrorMessage('ElevenLabs Agent ID is not configured. Please add ELEVENLABS_AGENT_ID to backend/.env.');
+        } else if (backendCode === 'ELEVENLABS_UNAUTHORIZED') {
+          setErrorMessage('ElevenLabs rejected the API key as unauthorized. Please check your ELEVENLABS_API_KEY.');
+        } else if (backendMsg) {
+          setErrorMessage(backendMsg);
+        } else {
+          setErrorMessage(backendErr.message || 'Unable to connect to the backend receptionist service.');
+        }
+        setConnectionState('error');
+        return;
+      }
+
+      if (!signedUrl) {
+        setErrorMessage('Failed to acquire an authenticated session URL.');
+        setConnectionState('error');
+        return;
+      }
+
+      // Today's date in Asia/Kolkata timezone (YYYY-MM-DD) required by agent dynamic tool variables
+      let todayDate = backendDate;
+      if (!todayDate) {
+        const parts = new Intl.DateTimeFormat('en-US', {
+          timeZone: 'Asia/Kolkata',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+        }).formatToParts(new Date());
+        const y = parts.find((p) => p.type === 'year')?.value ?? '2026';
+        const m = parts.find((p) => p.type === 'month')?.value ?? '01';
+        const d = parts.find((p) => p.type === 'day')?.value ?? '01';
+        todayDate = `${y}-${m}-${d}`;
+      }
+
+      // 3. Start Session using official ElevenLabs Client with signed URL and dynamic variables
+      const conv = await Conversation.startSession({
+        signedUrl,
+        connectionType: 'websocket',
+        dynamicVariables: {
+          date: todayDate,
+        },
+        onConnect: () => {
+          setConnectionState('connected');
+          setAgentMode('listening');
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `init-msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+              source: 'ai',
+              text: 'Namaste! Welcome to our Community Hall Booking Service. How can I help you plan your event today?',
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            },
+          ]);
+        },
+        onDisconnect: (details?: any) => {
+          const closeCode = details?.closeCode ?? details?.context?.code;
+          const closeReason = details?.closeReason ?? details?.context?.reason ?? details?.message;
+          console.warn(`[ElevenLabs Voice Disconnected] code=${closeCode}, reason=${closeReason || 'none'}, type=${details?.reason}`);
+
+          if (details?.reason === 'error' && closeCode && closeCode !== 1000) {
+            setErrorMessage(`Voice session closed (${closeCode}: ${closeReason || 'Server closed connection'})`);
+            setConnectionState('error');
+          } else {
+            setConnectionState('idle');
+          }
+          setAgentMode('idle');
+          conversationRef.current = null;
+        },
+        onModeChange: ({ mode }: { mode: 'speaking' | 'listening' }) => {
+          setAgentMode(mode);
+        },
+        onMessage: (payload: any) => {
+          if (payload?.message) {
+            const isAgent = payload.role === 'agent' || payload.source === 'ai';
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                source: isAgent ? 'ai' : 'user',
+                text: payload.message,
+                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              },
+            ]);
+          }
+        },
+        onError: (err: any) => {
+          console.error('[ElevenLabs Voice Error]', err);
+          const errorText = typeof err === 'string' ? err : err?.message || 'Voice connection encountered an error';
+          setErrorMessage(errorText);
+          setConnectionState('error');
+        },
+      });
+
+      conversationRef.current = conv;
+    } catch (err: any) {
+      console.error('[ElevenLabs Connection Failed]', err);
+      setConnectionState('error');
+      setErrorMessage(err?.message || 'Unable to establish a voice connection with ElevenLabs.');
+    } finally {
+      isStartingRef.current = false;
+    }
+  };
+
+  const endVoiceSession = async () => {
+    if (conversationRef.current) {
+      try {
+        await conversationRef.current.endSession();
+      } catch (err) {
+        console.warn('Error ending session:', err);
+      }
+      conversationRef.current = null;
+    }
+    setConnectionState('idle');
+    setAgentMode('idle');
+  };
+
+  const toggleMute = () => {
+    if (conversationRef.current) {
+      const nextMuted = !isMuted;
+      setIsMuted(nextMuted);
+      conversationRef.current.setVolume({ volume: nextMuted ? 0 : volume });
+    }
+  };
+
+  return (
+    <>
+      {/* ------------------------------------------------------------- */}
+      {/* 1. FLOATING LAUNCHER BUTTON                                   */}
+      {/* ------------------------------------------------------------- */}
+      <aside aria-label="AI Voice Receptionist" className="fixed bottom-6 right-6 z-50 flex items-center gap-3">
+        {!isOpen && (
+          <motion.button
+            initial={{ opacity: 0, scale: 0.9, x: 10 }}
+            animate={{ opacity: 1, scale: 1, x: 0 }}
+            exit={{ opacity: 0, scale: 0.9, x: 10 }}
+            onClick={() => setIsOpen(true)}
+            className="hidden sm:flex items-center gap-2 rounded-full border border-sand bg-paper/95 px-4 py-2.5 shadow-lift backdrop-blur-md transition-all hover:border-gold hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-forest"
+            aria-label="Open AI Voice Receptionist panel"
+          >
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-gold opacity-75"></span>
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-forest"></span>
+            </span>
+            <span className="text-xs font-semibold tracking-wide text-forest">Talk to AI Receptionist</span>
+            <span className="rounded-full bg-sand/60 px-2 py-0.5 text-[10px] font-medium text-stone">EN / KA / HI</span>
+          </motion.button>
+        )}
+
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={() => {
+            if (isOpen && isMinimized) {
+              setIsMinimized(false);
+            } else {
+              setIsOpen(!isOpen);
+            }
+          }}
+          className={`relative flex h-14 w-14 items-center justify-center rounded-full shadow-lift transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 ${
+            connectionState === 'connected'
+              ? 'bg-gradient-to-tr from-forest to-moss text-ivory ring-4 ring-gold/40'
+              : 'bg-forest text-ivory hover:bg-moss'
+          }`}
+          aria-expanded={isOpen}
+          aria-label={isOpen ? 'Close AI Receptionist panel' : 'Open AI Voice Receptionist'}
+        >
+          {connectionState === 'connected' ? (
+            <motion.div
+              animate={{ scale: agentMode === 'speaking' ? [1, 1.25, 1] : 1 }}
+              transition={{ repeat: Infinity, duration: 1.2 }}
+            >
+              <Radio className="h-6 w-6 text-gold" />
+            </motion.div>
+          ) : isOpen ? (
+            <X className="h-6 w-6" />
+          ) : (
+            <Phone className="h-6 w-6" />
+          )}
+
+          {/* Connected pulse glow */}
+          {connectionState === 'connected' && (
+            <span className="absolute -top-1 -right-1 flex h-4 w-4">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-gold opacity-75"></span>
+              <span className="relative inline-flex h-4 w-4 rounded-full bg-gold"></span>
+            </span>
+          )}
+        </motion.button>
+      </aside>
+
+      {/* ------------------------------------------------------------- */}
+      {/* 2. EXPANDED RECEPTIONIST DRAWER PANEL                          */}
+      {/* ------------------------------------------------------------- */}
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: 30, scale: 0.95 }}
+            animate={{
+              opacity: 1,
+              y: 0,
+              scale: 1,
+              height: isMinimized ? 'auto' : '560px',
+            }}
+            exit={{ opacity: 0, y: 30, scale: 0.95 }}
+            transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+            className={`fixed bottom-24 right-6 z-50 w-[calc(100vw-3rem)] sm:w-96 rounded-2xl border border-line bg-paper shadow-2xl backdrop-blur-xl flex flex-col overflow-hidden ${
+              isMinimized ? 'p-4' : ''
+            }`}
+            role="dialog"
+            aria-modal="false"
+            aria-label="AI Receptionist Voice Session"
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-line bg-ivory px-4 py-3.5">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-forest text-gold shadow-soft">
+                  <Sparkles className="h-4 w-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-forest flex items-center gap-1.5 font-serif">
+                    AI Voice Receptionist
+                  </h3>
+                  <p className="text-[11px] text-stone flex items-center gap-1">
+                    <Globe className="h-3 w-3 text-gold-dark" /> English • Kannada • Hindi
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setIsMinimized(!isMinimized)}
+                  className="rounded-lg p-1.5 text-stone hover:bg-sand/60 transition-colors"
+                  aria-label={isMinimized ? 'Expand panel' : 'Minimize panel'}
+                >
+                  {isMinimized ? <Maximize2 className="h-4 w-4" /> : <Minimize2 className="h-4 w-4" />}
+                </button>
+                <button
+                  onClick={() => {
+                    endVoiceSession();
+                    setIsOpen(false);
+                  }}
+                  className="rounded-lg p-1.5 text-stone hover:bg-sand/60 transition-colors"
+                  aria-label="Close receptionist panel"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            {!isMinimized && (
+              <>
+                {/* Visualizer & Status Hero Banner */}
+                <div className="relative border-b border-line bg-gradient-to-b from-ivory to-paper p-5 flex flex-col items-center justify-center text-center">
+                  {/* Status Indicator Avatar */}
+                  <div className="relative my-2">
+                    <motion.div
+                      animate={{
+                        scale:
+                          connectionState === 'connected' && agentMode === 'speaking'
+                            ? [1, 1.15, 1.05, 1.2, 1]
+                            : connectionState === 'connected'
+                            ? [1, 1.04, 1]
+                            : 1,
+                      }}
+                      transition={{
+                        repeat: Infinity,
+                        duration: agentMode === 'speaking' ? 1.4 : 2.5,
+                      }}
+                      className={`flex h-20 w-20 items-center justify-center rounded-full shadow-soft transition-colors ${
+                        connectionState === 'connected'
+                          ? agentMode === 'speaking'
+                            ? 'bg-gradient-to-tr from-forest to-gold text-ivory'
+                            : 'bg-forest text-gold'
+                          : connectionState === 'connecting'
+                          ? 'bg-amber-100 text-amber-800'
+                          : connectionState === 'error'
+                          ? 'bg-rose-100 text-rose-800'
+                          : 'bg-sand text-forest'
+                      }`}
+                    >
+                      {connectionState === 'connected' ? (
+                        agentMode === 'speaking' ? (
+                          <Volume2 className="h-8 w-8 animate-pulse text-ivory" />
+                        ) : (
+                          <Mic className="h-8 w-8 text-gold" />
+                        )
+                      ) : connectionState === 'connecting' ? (
+                        <Radio className="h-8 w-8 animate-spin text-forest" />
+                      ) : (
+                        <Phone className="h-8 w-8 text-forest" />
+                      )}
+                    </motion.div>
+
+                    {/* Animated Ripple for Voice Activity */}
+                    {connectionState === 'connected' && (
+                      <motion.div
+                        animate={{ scale: [1, 1.6, 2], opacity: [0.6, 0.3, 0] }}
+                        transition={{ repeat: Infinity, duration: 2 }}
+                        className="absolute inset-0 rounded-full border-2 border-gold pointer-events-none"
+                      />
+                    )}
+                  </div>
+
+                  {/* Status Text */}
+                  <div className="mt-2">
+                    {connectionState === 'idle' && (
+                      <>
+                        <h4 className="text-sm font-semibold text-ink">Ready to assist you</h4>
+                        <p className="text-xs text-stone mt-0.5">
+                          Inquire about halls, check dates, and submit booking requests by voice.
+                        </p>
+                      </>
+                    )}
+
+                    {connectionState === 'requesting_permission' && (
+                      <>
+                        <h4 className="text-sm font-semibold text-amber-800">Requesting microphone...</h4>
+                        <p className="text-xs text-stone mt-0.5">Please allow audio access in your browser.</p>
+                      </>
+                    )}
+
+                    {connectionState === 'connecting' && (
+                      <>
+                        <h4 className="text-sm font-semibold text-forest">Connecting to AI Receptionist...</h4>
+                        <p className="text-xs text-stone mt-0.5">Establishing secure voice channel.</p>
+                      </>
+                    )}
+
+                    {connectionState === 'connected' && (
+                      <>
+                        <div className="inline-flex items-center gap-1.5 rounded-full bg-forest/10 px-3 py-1 text-xs font-medium text-forest">
+                          <span className="h-2 w-2 rounded-full bg-forest animate-pulse" />
+                          {agentMode === 'speaking'
+                            ? 'AI Receptionist is speaking...'
+                            : 'Listening — speak naturally...'}
+                        </div>
+                        <p className="text-[11px] text-stone mt-1">
+                          Feel free to speak in English, Kannada, or Hindi.
+                        </p>
+                      </>
+                    )}
+
+                    {connectionState === 'error' && (
+                      <div className="flex items-start gap-1.5 rounded-lg bg-red-50 p-2.5 text-left text-xs text-red-800">
+                        <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-red-600" />
+                        <div>
+                          <p className="font-semibold">Connection Issue</p>
+                          <p className="mt-0.5 text-[11px] leading-relaxed text-red-700">{errorMessage}</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Conversation Transcript Area */}
+                <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-paper">
+                  {messages.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-full text-center text-stone">
+                      <MessageSquare className="h-6 w-6 text-sand mb-2" />
+                      <p className="text-xs">No active conversation yet.</p>
+                      <p className="text-[11px] text-stone/80 mt-1 max-w-[220px]">
+                        Click "Start Voice Call" below to converse directly with our receptionist.
+                      </p>
+                    </div>
+                  ) : (
+                    messages.map((m) => (
+                      <div
+                        key={m.id}
+                        className={`flex flex-col ${
+                          m.source === 'user' ? 'items-end' : 'items-start'
+                        }`}
+                      >
+                        <div
+                          className={`max-w-[85%] rounded-2xl px-3.5 py-2 text-xs leading-relaxed shadow-sm ${
+                            m.source === 'user'
+                              ? 'bg-forest text-ivory rounded-br-none'
+                              : 'bg-ivory text-ink border border-line rounded-bl-none'
+                          }`}
+                        >
+                          {m.text}
+                        </div>
+                        <span className="text-[9px] text-stone mt-0.5 px-1">{m.timestamp}</span>
+                      </div>
+                    ))
+                  )}
+                  <div ref={messagesEndRef} />
+                </div>
+
+                {/* Footer Controls */}
+                <div className="border-t border-line bg-ivory p-3.5">
+                  {connectionState === 'connected' ? (
+                    <div className="flex items-center justify-between gap-3">
+                      <button
+                        onClick={toggleMute}
+                        className={`flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-medium transition-colors ${
+                          isMuted
+                            ? 'border-amber-400 bg-amber-50 text-amber-800'
+                            : 'border-line bg-paper text-ink hover:bg-sand/40'
+                        }`}
+                      >
+                        {isMuted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                        {isMuted ? 'Muted' : 'Mute'}
+                      </button>
+
+                      <button
+                        onClick={endVoiceSession}
+                        className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-2.5 text-xs font-semibold text-white shadow-soft transition-colors hover:bg-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600"
+                      >
+                        <PhoneOff className="h-4 w-4" />
+                        End Conversation
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      <button
+                        disabled={connectionState === 'connecting' || connectionState === 'requesting_permission'}
+                        onClick={startVoiceSession}
+                        className="w-full flex items-center justify-center gap-2 rounded-xl bg-forest px-4 py-3 text-xs font-semibold text-ivory shadow-soft transition-all hover:bg-moss disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-forest"
+                      >
+                        <Phone className="h-4 w-4 text-gold" />
+                        {connectionState === 'connecting' || connectionState === 'requesting_permission'
+                          ? 'Starting Call...'
+                          : 'Start Voice Call'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
+  );
+};
+
+export default AIReceptionistWidget;

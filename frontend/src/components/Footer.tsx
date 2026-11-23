@@ -44,7 +44,7 @@ export const Footer: React.FC = () => {
             <h4 className="font-sans text-xs font-semibold uppercase tracking-[0.18em] text-gold">Contact</h4>
             <ul className="mt-5 space-y-4 text-sm">
               <li className="flex gap-3"><MapPin className="mt-0.5 h-4 w-4 shrink-0 text-gold" /> Bengaluru, Karnataka</li>
-              <li className="flex gap-3"><Mail className="mt-0.5 h-4 w-4 shrink-0 text-gold" /> hello@sabhahalls.example</li>
+              <li className="flex gap-3"><Mail className="mt-0.5 h-4 w-4 shrink-0 text-gold" /> <span className="break-all">hello@sabhahalls.example</span></li>
               <li className="flex gap-3"><Phone className="mt-0.5 h-4 w-4 shrink-0 text-gold" /> Demo contact — not a real line</li>
             </ul>
             <div className="mt-6 flex gap-3">
