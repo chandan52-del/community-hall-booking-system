@@ -1,0 +1,86 @@
+services:
+  # -------------------------------------------------------------
+  # 1. Managed MySQL 8.0 Database (Private Network Only)
+  # -------------------------------------------------------------
+  db:
+    image: mysql:8.0
+    container_name: community_hall_mysql_prod
+    restart: unless-stopped
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: community_hall_management_v2
+      MYSQL_USER: hall_app_user
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - hall_network
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u hall_app_user --password=$${MYSQL_PASSWORD} || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+
+  # -------------------------------------------------------------
+  # 2. Node.js + Express + Prisma REST API Backend
+  # -------------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: community_hall_backend_prod
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      DATABASE_URL: mysql://hall_app_user:${MYSQL_PASSWORD}@db:3306/community_hall_management_v2
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: 7d
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8080}
+    networks:
+      - hall_network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # -------------------------------------------------------------
+  # 3. React SPA + Nginx Reverse Proxy Gateway
+  # -------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: /api
+    container_name: community_hall_gateway_prod
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+    networks:
+      - hall_network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  hall_network:
+    driver: bridge
+
+volumes:
+  mysql_data:
+    name: community_hall_mysql_prod_volume
+    driver: local

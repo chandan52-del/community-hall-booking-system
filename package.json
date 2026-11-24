@@ -1,0 +1,25 @@
+{
+  "name": "community-hall-booking-system-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Premium 3D Community Hall Booking and Management System Monorepo",
+  "scripts": {
+    "install:all": "npm --prefix backend install && npm --prefix frontend install",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "build:backend": "npm --prefix backend run build",
+    "build:frontend": "npm --prefix frontend run build"
+  },
+  "keywords": [
+    "community-hall",
+    "booking-system",
+    "threejs",
+    "react-three-fiber",
+    "react",
+    "express",
+    "prisma",
+    "mysql"
+  ],
+  "author": "Full-Stack Engineer",
+  "license": "ISC"
+}
