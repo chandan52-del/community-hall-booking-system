@@ -20,7 +20,7 @@ if (!databaseUrl || databaseUrl.trim() === '') {
 
 // 4. Validate host safety: Reject localhost and 127.0.0.1
 try {
-  const parsed = new URL(databaseUrl.replace(/^mysql:\/\//i, 'http://'));
+  const parsed = new URL(databaseUrl.replace(/^(mysql|postgres|postgresql):\/\//i, 'http://'));
   const hostname = parsed.hostname.toLowerCase();
 
   if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {

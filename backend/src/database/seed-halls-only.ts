@@ -1,38 +1,63 @@
 
+import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
 import { PrismaClient } from '@prisma/client';
 
-// 1. Resolve .env.production path reliably relative to this file
-const envPath = path.resolve(__dirname, '../../.env.production');
+// 1. Resolve environment file: prefer .env, fallback to .env.production
+const localEnvPath = path.resolve(__dirname, '../../.env');
+const prodEnvPath = path.resolve(__dirname, '../../.env.production');
 
-// 2. Load .env.production with explicit override
-dotenv.config({ path: envPath, override: true });
+let resolvedEnvPath: string | null = null;
+if (fs.existsSync(localEnvPath)) {
+  resolvedEnvPath = localEnvPath;
+  dotenv.config({ path: localEnvPath });
+} else if (fs.existsSync(prodEnvPath)) {
+  resolvedEnvPath = prodEnvPath;
+  dotenv.config({ path: prodEnvPath });
+} else {
+  dotenv.config();
+}
 
 const databaseUrl = process.env.DATABASE_URL;
 
-// 3. Validate existence
+// 2. Validate existence
 if (!databaseUrl || databaseUrl.trim() === '') {
-  console.error('❌ Error: DATABASE_URL is missing or empty in .env.production');
-  console.error(`Target path resolved: ${envPath}`);
+  console.error('❌ Error: DATABASE_URL is missing or empty.');
+  console.error(`Target env path resolved: ${resolvedEnvPath || '(default)'}`);
   process.exit(1);
 }
 
-// 4. Validate host safety: Reject localhost and 127.0.0.1
+// 3. Protocol Safety Validation: strictly require PostgreSQL, reject MySQL
+if (databaseUrl.startsWith('mysql://')) {
+  console.error('❌ Safety Error: DATABASE_URL points to MySQL. Refusing to connect to old MySQL database.');
+  process.exit(1);
+}
+
+if (!databaseUrl.startsWith('postgresql://') && !databaseUrl.startsWith('postgres://')) {
+  console.error('❌ Safety Error: DATABASE_URL must be a valid PostgreSQL connection URL.');
+  process.exit(1);
+}
+
+// 4. Validate host safety: Reject localhost, 127.0.0.1, and legacy Aiven/Enzonic hosts
 try {
-  const parsed = new URL(databaseUrl.replace(/^mysql:\/\//i, 'http://'));
+  const parsed = new URL(databaseUrl);
   const hostname = parsed.hostname.toLowerCase();
 
   if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
-    console.error('❌ Safety Error: DATABASE_URL in .env.production points to localhost/127.0.0.1.');
+    console.error('❌ Safety Error: DATABASE_URL points to localhost/127.0.0.1.');
     console.error('Refusing to seed against a local database when production is expected.');
     process.exit(1);
   }
-} catch {
-  if (databaseUrl.includes('localhost') || databaseUrl.includes('127.0.0.1')) {
-    console.error('❌ Safety Error: DATABASE_URL contains localhost or 127.0.0.1.');
+
+  if (hostname.includes('aivencloud.com') || hostname.includes('enzonic.com')) {
+    console.error('❌ Safety Error: DATABASE_URL targets an old MySQL host (Aiven/Enzonic). Refusing to connect.');
     process.exit(1);
   }
+} catch (err: unknown) {
+  const message = err instanceof Error ? err.message : String(err);
+  console.error('❌ Safety Error: Unable to parse DATABASE_URL host:', message);
+  process.exit(1);
 }
 
 // 5. Explicitly bind datasource URL to PrismaClient to prevent fallback to .env
@@ -203,14 +228,12 @@ async function main() {
   const databaseUrl = process.env.DATABASE_URL;
 
   if (!databaseUrl) {
-    throw new Error(
-      'DATABASE_URL is missing. Check backend/.env.production.',
-    );
+    throw new Error('DATABASE_URL is missing. Check backend/.env.');
   }
 
-  if (!databaseUrl.startsWith('mysql://')) {
+  if (!databaseUrl.startsWith('postgresql://') && !databaseUrl.startsWith('postgres://')) {
     throw new Error(
-      'Unexpected database URL type. This script is intended for MySQL.',
+      'Unexpected database URL type. Expected postgresql:// or postgres://.',
     );
   }
 

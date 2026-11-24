@@ -1,12 +1,25 @@
+import path from 'path';
+import fs from 'fs';
 import { z } from 'zod';
 import dotenv from 'dotenv';
 
-dotenv.config();
+// Explicitly resolve backend/.env regardless of process working directory
+const backendEnvPath = path.resolve(__dirname, '../../.env');
+const cwdEnvPath = path.resolve(process.cwd(), '.env');
+
+if (fs.existsSync(backendEnvPath)) {
+  dotenv.config({ path: backendEnvPath });
+} else if (fs.existsSync(cwdEnvPath)) {
+  dotenv.config({ path: cwdEnvPath });
+} else {
+  dotenv.config();
+}
 
 const envSchema = z.object({
   PORT: z.string().default('5000').transform((val) => parseInt(val, 10)),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
+  DIRECT_URL: z.string().optional(),
   SHADOW_DATABASE_URL: z.string().optional(),
   JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 characters long'),
   JWT_EXPIRES_IN: z.string().default('7d'),

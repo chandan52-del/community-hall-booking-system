@@ -46,7 +46,7 @@ const handleDatabaseError = (res: Response, error: unknown, action: string): voi
       res,
       503,
       'DATABASE_UNAVAILABLE',
-      'Database service is currently unavailable. Please check that MySQL is running.'
+      'Database service is currently unavailable. Please check database connectivity.'
     );
     return;
   }

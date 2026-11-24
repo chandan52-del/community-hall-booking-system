@@ -1,11 +1,11 @@
 // Prisma Schema for Community Hall Booking and Management System
-// Target Engine: MySQL 8
-// Database: community_hall_management_v2
+// Target Engine: PostgreSQL (Supabase)
+// Project: sabha-halls-project
 
 datasource db {
-  provider          = "mysql"
-  url               = env("DATABASE_URL")
-  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 generator client {
